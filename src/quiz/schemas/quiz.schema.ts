@@ -12,8 +12,8 @@ export interface Quiz extends Document {
 
 export const QuizSchema = new Schema<Quiz>({
   day: { type: Number, required: true },
-  week: { type: Number, required: true },
-  month: { type: Number, required: true },
+  week: { type: Number, required: false },
+  month: { type: Number, required: false },
   questionIds: [{ type: Schema.Types.ObjectId, ref: 'Question' }],
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Inactive' },
   createdAt: { type: Date, default: Date.now },

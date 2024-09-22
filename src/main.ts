@@ -6,7 +6,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
     // Enable global validation
-    app.useGlobalPipes(new ValidationPipe());
+   // app.useGlobalPipes(new ValidationPipe());
 
   // Set a higher timeout (e.g., 60 seconds)
   app.use((req, res, next) => {

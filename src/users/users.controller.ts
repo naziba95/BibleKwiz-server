@@ -56,6 +56,10 @@ export class UsersController {
     }
   }
   
+  @Get('/get/:id')
+  async getUserById(@Param('id') id: string) {
+    return await this.usersService.findUserById(id);
+  }
 
   @Get()
   findAll() {

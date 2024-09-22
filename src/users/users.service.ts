@@ -82,9 +82,29 @@ export class UsersService {
         email: user.email,
         rank: user.currentRank,
         points: user.points,
-        id: user._id
+        id: user._id,
+        CompletionStatus: user.quizCompletionStatus
         // Get other user details like Weekly, all time and current rank later
       },
     };
   }
+
+  async findUserById(userId: string): Promise<any> {
+    const user = await this.userModel.findById(userId).exec();
+    
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+  
+    return {
+      fullName: user.fullName,
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      currentRank: user.currentRank,
+      points: user.points,
+      quizCompletionStatus: user.quizCompletionStatus,
+      createdAt: user.createdAt,
+    };
+  }
+  
 }  

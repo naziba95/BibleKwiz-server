@@ -16,6 +16,7 @@ import { Response } from 'express';
 import { QuizService } from './quiz.service';
 import { CreateQuizDto } from './dto/create-quiz.dto';
 import { UpdateQuizDto } from './dto/update-quiz.dto';
+import { updateQuestionDto } from './dto/updateQuestion.dto';
 
 @Controller('quiz')
 export class QuizController {
@@ -31,6 +32,7 @@ export class QuizController {
         data: quiz,
       });
     } catch (error) {
+      console.error(error);
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
         message: error.message || 'Failed to create quiz',
@@ -51,6 +53,23 @@ export class QuizController {
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
         message: error.message || 'Failed to retrieve active quiz',
+      });
+    }
+  }
+
+  @Get('inactive')
+  async getInactiveQuiz(@Res() res: Response): Promise<Response> {
+    try {
+      const activeQuiz = await this.quizService.getInactiveQuiz();
+      return res.status(HttpStatus.OK).json({
+        statusCode: HttpStatus.OK,
+        message: 'Inactive quiz retrieved successfully',
+        data: activeQuiz,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: error.message || 'Failed to retrieve inactive quiz',
       });
     }
   }
@@ -106,6 +125,27 @@ export class QuizController {
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
         message: error.message || 'Failed to mark question',
+      });
+    }
+  }
+
+  @Post('updatequestion/:id')
+  async updateQuestion(
+    @Param('id') id: string,
+    @Body() updateQuestionDto: updateQuestionDto,
+    @Res() res: Response,
+  ): Promise<Response> {
+    try {
+      console.log(updateQuestionDto)
+      const updatedQuestion = await this.quizService.updateQuestion(id, updateQuestionDto);
+      return res.status(HttpStatus.OK).json({
+        statusCode: HttpStatus.OK,
+        message: 'updated successfully',
+      });
+    } catch (error) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: error.message || 'Failed to update question',
       });
     }
   }

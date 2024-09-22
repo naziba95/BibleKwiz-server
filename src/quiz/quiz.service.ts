@@ -1,8 +1,9 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types, Schema } from 'mongoose';
 import { CreateQuizDto } from './dto/create-quiz.dto';
 import { UpdateQuizDto } from './dto/update-quiz.dto';
+import { updateQuestionDto } from './dto/updateQuestion.dto'
 import { Quiz } from './schemas/quiz.schema';
 import { Question } from './schemas/question.schema';
 import { QuizSession } from './schemas/quizSession.schema';
@@ -23,7 +24,7 @@ export class QuizService {
   ) { }
 
   async createQuiz(createQuizDto: CreateQuizDto): Promise<Quiz> {
-    const { day, week, month, questions } = createQuizDto;
+    const { day, questions } = createQuizDto;
 
     // Save questions first
     const savedQuestions = await this.questionModel.insertMany(questions);
@@ -32,8 +33,6 @@ export class QuizService {
     // Create the quiz
     const quiz = new this.quizModel({
       day,
-      week,
-      month,
       questionIds,
       status: 'Inactive',
       createdAt: new Date(),
@@ -64,10 +63,25 @@ export class QuizService {
     }
   }
 
-  async getActiveQuiz(): Promise<Quiz | null> {
+  async getActiveQuiz(): Promise<Quiz[] | null> {
     try {
       const activeQuiz = await this.quizModel
-        .findOne({ status: 'Active' })
+        .find({ status: 'Active' })
+        .populate({
+          path: 'questionIds',
+          model: 'Question', // Specify the model to populate from
+        })
+        .exec();
+      return activeQuiz;
+    } catch (error) {
+      throw new HttpException('Failed to retrieve active quiz', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async getInactiveQuiz(): Promise<Quiz[] | null> {
+    try {
+      const activeQuiz = await this.quizModel
+        .find({ status: 'Inactive' })
         .populate({
           path: 'questionIds',
           model: 'Question', // Specify the model to populate from
@@ -93,7 +107,7 @@ export class QuizService {
       throw new HttpException('Failed to retrieve quizzes by day', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
-  
+
 
   async markQuestion(questionId: string, selectedOption: string): Promise<boolean> {
     try {
@@ -127,11 +141,78 @@ export class QuizService {
 
   async update(id: string, updateQuizDto: UpdateQuizDto): Promise<Quiz> {
     try {
-      return await this.quizModel.findByIdAndUpdate(id, updateQuizDto, { new: true }).exec();
+      const quiz = await this.quizModel.findById(id).exec();
+      if (!quiz) {
+        throw new HttpException('Quiz not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Update quiz properties
+      if (updateQuizDto.day !== undefined) quiz.day = updateQuizDto.day;
+      if (updateQuizDto.week !== undefined) quiz.week = updateQuizDto.week;
+      if (updateQuizDto.month !== undefined) quiz.month = updateQuizDto.month;
+      if (updateQuizDto.status !== undefined) quiz.status = updateQuizDto.status;
+
+      // Update questions if provided
+      if (updateQuizDto.questions && updateQuizDto.questions.length > 0) {
+        const updatedQuestionIds: Types.ObjectId[] = [];
+
+        for (let i = 0; i < updateQuizDto.questions.length; i++) {
+          const questionDto = updateQuizDto.questions[i];
+          const questionId = quiz.questionIds[i];
+
+          if (questionId) {
+            // Update existing question
+            const updatedQuestion = await this.questionModel.findByIdAndUpdate(
+              questionId,
+              questionDto,
+              { new: true }
+            ).exec();
+            if (updatedQuestion) {
+              updatedQuestionIds.push(updatedQuestion._id as Types.ObjectId);
+            }
+          } else {
+            // Create new question
+            const newQuestion = new this.questionModel(questionDto);
+            const savedQuestion = await newQuestion.save();
+            updatedQuestionIds.push(savedQuestion._id as Types.ObjectId);
+          }
+        }
+
+        // Assign questionIds, casting to Schema.Types.ObjectId[]
+        quiz.questionIds = updatedQuestionIds as unknown as Schema.Types.ObjectId[];
+      }
+
+      return await quiz.save();
     } catch (error) {
       throw new HttpException('Failed to update quiz', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+
+  async updateQuestion(questionId: string, updateQuestionDto: updateQuestionDto): Promise<Question> {
+    try {
+      const question = await this.questionModel.findById(questionId).exec();
+      if (!question) {
+        throw new HttpException('Question not found', HttpStatus.NOT_FOUND);
+      }
+
+      if (updateQuestionDto.question !== undefined) question.question = updateQuestionDto.question;
+      if (updateQuestionDto.optionA !== undefined) question.optionA = updateQuestionDto.optionA
+      if (updateQuestionDto.optionB !== undefined) question.optionB = updateQuestionDto.optionB;
+      if (updateQuestionDto.optionC !== undefined) question.optionC = updateQuestionDto.optionC;
+      if (updateQuestionDto.optionD !== undefined) question.optionD = updateQuestionDto.optionD;
+      if (updateQuestionDto.correctOption !== undefined) question.correctOption = updateQuestionDto.correctOption;
+
+      await question.save()
+
+      return question;
+
+    } catch (error) {
+      throw new HttpException('Failed to update question', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+
 
   async remove(id: string): Promise<void> {
     try {
@@ -149,22 +230,35 @@ export class QuizService {
       score,
     });
 
+      // Retrieve the quiz to get the day
+  const quiz = await this.quizModel.findById(quizId).exec();
+  if (!quiz) {
+    throw new Error('Quiz not found');
+  }
+
     // Update leaderboard and get user's rank and current week total
     const { rank, currentWeekTotal } = await this.updateLeaderboard(userId, score);
 
     const savedSession = await quizSession.save();
+
+     // Update quizCompletionStatus for the specific day to 'Y'
+  await this.userModel.updateOne(
+    { _id: userId, 'quizCompletionStatus.day': quiz.day },
+    { $set: { 'quizCompletionStatus.$.status': 'Y' } }
+  );
+
     return { quizSession: savedSession, rank, currentWeekTotal };
   }
 
   async updateLeaderboard(userId: string, score: number): Promise<{ rank: number; currentWeekTotal: number }> {
     const week = this.getCurrentWeekNumber();
     let userLeaderboard = await this.leaderboardModel.findOne({ userId });
-  
+
     if (userLeaderboard) {
       // Update existing leaderboard entry
       const currentTotal = parseFloat(userLeaderboard.currentWeekTotal.toString()) || 0;
       const grandTotal = parseFloat(userLeaderboard.grandtotal.toString()) || 0;
-  
+
       userLeaderboard.currentWeekTotal = currentTotal + Number(score);
       userLeaderboard.grandtotal = grandTotal + Number(score);
       userLeaderboard.currentWeek = week;
@@ -178,15 +272,15 @@ export class QuizService {
         currentWeek: week,
       });
     }
-  
+
     await userLeaderboard.save();
-  
+
     // Recalculate rankings
     const allRankings = await this.leaderboardModel
       .find({ currentWeek: week })
       .sort({ currentWeekTotal: -1 })
       .exec();
-  
+
     // Update ranks in bulk
     const bulkOps = allRankings.map((doc, index) => ({
       updateOne: {
@@ -194,12 +288,12 @@ export class QuizService {
         update: { $set: { rank: index + 1 } }
       }
     }));
-  
+
     await this.leaderboardModel.bulkWrite(bulkOps);
-  
+
     // Get the updated rank and currentWeekTotal for the user
     const updatedUser = await this.leaderboardModel.findOne({ userId });
-  
+
     // Update user's rank, currentWeekPoints, and total points in the user model
     await this.userModel.updateOne(
       { _id: userId },
@@ -211,46 +305,83 @@ export class QuizService {
         },
       }
     );
-  
+
     return {
       rank: updatedUser.rank,
       currentWeekTotal: parseFloat(updatedUser.currentWeekTotal.toString()) || 0,
     };
   }
-  
 
-  @Cron('0 0 * * 0') // Custom cron expression for every Sunday at midnight
-  async handleCron(): Promise<void> {
-    await this.resetWeeklyTotals();
-  }
+
+  // @Cron('0 0 * * 0') // Custom cron expression for every Sunday at midnight
+  // async handleCron(): Promise<void> {
+  //   await this.resetWeeklyTotals();
+  // }
+
+  // @Cron('*/2 * * * *') // Runs every 2 minutes
+  // async handleCron(): Promise<void> {
+  //   await this.resetWeeklyTotals();
+  //   console.log("cron job completed")
+  // }
+
 
   async resetWeeklyTotals(): Promise<void> {
     const week = this.getCurrentWeekNumber();
     const lastWeek = week - 1;
 
-    // Create leaderboard history
+    // Fetch leaderboard rankings for last week based on `currentWeekTotal`
     const rankings = await this.leaderboardModel
       .find({ currentWeek: lastWeek })
-      .sort({ grandtotal: -1 })
+      .sort({ currentWeekTotal: -1 }) // Sort by currentWeekTotal to determine weekly rank
       .exec();
 
-    const leaderboardHistory = rankings.map((entry, index) => ({
-      userId: entry.userId,
-      rank: index + 1,
-    }));
+    if (rankings.length > 0) {
+      // Map the leaderboard data for the week based on currentWeekTotal
+      const leaderboardHistory = rankings.map((entry, index) => ({
+        userId: entry.userId,
+        rank: index + 1, // Assign ranks based on sorted currentWeekTotal
+      }));
 
-    await this.leaderboardHistoryModel.create({
-      week: lastWeek,
-      rankings: leaderboardHistory,
-    });
+      // Save the history for the last week
+      await this.leaderboardHistoryModel.create({
+        week: lastWeek, // Save last week's number
+        rankings: leaderboardHistory, // Save the rankings based on currentWeekTotal
+      });
+    }
 
-    // Move current week total to last week and reset current week total
+    // Reset current week totals and update last week's totals in leaderboard model
     await this.leaderboardModel.updateMany(
       { currentWeek: week },
-      {
-        $set: { lastWeekTotal: '$currentWeekTotal', currentWeekTotal: 0 },
-      },
+      [
+        {
+          $set: {
+            lastWeekTotal: '$currentWeekTotal', // Move currentWeekTotal to lastWeekTotal
+            currentWeekTotal: 0, // Reset current week total
+          },
+        },
+      ]
     );
+
+   // Clear current rank and points in the User model and reset quizCompletionStatus
+  await this.userModel.updateMany(
+    {},
+    {
+      $set: {
+        currentRank: 0, // Reset current rank to 0
+        points: 0,      // Reset points to 0
+        // Reset quizCompletionStatus for all days to 'N'
+        quizCompletionStatus: [
+          { day: 1, status: 'N' },
+          { day: 2, status: 'N' },
+          { day: 3, status: 'N' },
+          { day: 4, status: 'N' },
+          { day: 5, status: 'N' },
+          { day: 6, status: 'N' },
+        ],
+      },
+    }
+  );
+
   }
 
   private getCurrentWeekNumber(): number {
@@ -261,7 +392,7 @@ export class QuizService {
   }
   async getCurrentWeekLeaderboard(): Promise<Array<{ fullName: string, currentWeekTotal: number, rank: number }>> {
     const week = this.getCurrentWeekNumber();
-    console.log(week)
+
     // Find all leaderboard entries for the current week, sorted by currentWeekTotal in descending order
     const leaderboard = await this.leaderboardModel
       .find({ currentWeek: week })
@@ -269,7 +400,12 @@ export class QuizService {
       .populate('userId', 'fullName') // Populate only the fullName from the User model
       .exec();
 
-    console.log(leaderboard)
+    // If all currentWeekTotal entries are 0, return an empty array
+    const allZeroPoints = leaderboard.every(entry => entry.currentWeekTotal === 0);
+
+    if (allZeroPoints) {
+      return [];
+    }
 
     // Map the leaderboard data to return only fullName, currentWeekTotal, and rank
     return leaderboard.map((entry) => {
@@ -281,6 +417,5 @@ export class QuizService {
       };
     });
   }
-
 }
 

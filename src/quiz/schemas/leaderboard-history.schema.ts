@@ -2,7 +2,7 @@ import { Schema, Document } from 'mongoose';
 
 export const LeaderboardHistorySchema = new Schema({
   week: { type: Number, required: true },
-  month: { type: String, required: true },
+  month: { type: String, required: false },
   rankings: [
     {
       userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
