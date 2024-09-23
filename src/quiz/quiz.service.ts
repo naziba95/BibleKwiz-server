@@ -253,12 +253,16 @@ export class QuizService {
   async updateLeaderboard(userId: string, score: number): Promise<{ rank: number; currentWeekTotal: number }> {
     const week = this.getCurrentWeekNumber();
     let userLeaderboard = await this.leaderboardModel.findOne({ userId });
-  
+    console.log(userLeaderboard)
+    let newWeekTotal;
     if (userLeaderboard) {
       const currentTotal = parseFloat(userLeaderboard.currentWeekTotal.toString()) || 0;
+      console.log(`current week total: ${currentTotal}`)
       const grandTotal = parseFloat(userLeaderboard.grandtotal.toString()) || 0;
   
       userLeaderboard.currentWeekTotal = currentTotal + Number(score);
+      newWeekTotal = currentTotal + Number(score);
+      console.log(`new week total : ${newWeekTotal}`)
       userLeaderboard.grandtotal = grandTotal + Number(score);
       userLeaderboard.currentWeek = week;
     } else {
@@ -291,18 +295,27 @@ export class QuizService {
   
     // Get the updated rank and currentWeekTotal for the user
     const updatedUser = await this.leaderboardModel.findOne({ userId });
-  
+     //console.log(updatedUser)
     // Update user's rank, currentWeekPoints, and total points in the user model
-    await this.userModel.updateOne(
-      { _id: userId },
-      {
-        $set: {
-          currentRank: updatedUser.currentWeekTotal > 0 ? updatedUser.rank : 0,
-          points: updatedUser.currentWeekTotal,
-        },
-      }
-    );
-  
+    const userToUpdate = await this.userModel.findOne({ _id : userId })
+    //console.log(userToUpdate)
+    userToUpdate.points = updatedUser.currentWeekTotal;
+    userToUpdate.currentRank = updatedUser.rank.toString();
+    await userToUpdate.save();
+    //console.log(userToUpdate)
+
+    // await this.userModel.updateOne(
+    //   { _id: userId },
+    //   {
+    //     $set: {
+    //       currentRank: updatedUser.currentWeekTotal > 0 ? updatedUser.rank : 0,
+    //       points: newWeekTotal,
+    //     },
+        
+    //   }
+    // );
+    
+
     return {
       rank: updatedUser.currentWeekTotal > 0 ? updatedUser.rank : 0,
       currentWeekTotal: parseFloat(updatedUser.currentWeekTotal.toString()) || 0,
