@@ -25,6 +25,7 @@ export class QuizController {
   @Post('create')
   async create(@Body() createQuizDto: CreateQuizDto, @Res() res: Response): Promise<Response> {
     try {
+      console.log(createQuizDto)
       const quiz = await this.quizService.createQuiz(createQuizDto);
       return res.status(HttpStatus.CREATED).json({
         statusCode: HttpStatus.CREATED,

@@ -253,17 +253,15 @@ export class QuizService {
   async updateLeaderboard(userId: string, score: number): Promise<{ rank: number; currentWeekTotal: number }> {
     const week = this.getCurrentWeekNumber();
     let userLeaderboard = await this.leaderboardModel.findOne({ userId });
-
+  
     if (userLeaderboard) {
-      // Update existing leaderboard entry
       const currentTotal = parseFloat(userLeaderboard.currentWeekTotal.toString()) || 0;
       const grandTotal = parseFloat(userLeaderboard.grandtotal.toString()) || 0;
-
+  
       userLeaderboard.currentWeekTotal = currentTotal + Number(score);
       userLeaderboard.grandtotal = grandTotal + Number(score);
       userLeaderboard.currentWeek = week;
     } else {
-      // Create new leaderboard entry
       userLeaderboard = new this.leaderboardModel({
         userId,
         grandtotal: score,
@@ -272,15 +270,15 @@ export class QuizService {
         currentWeek: week,
       });
     }
-
+  
     await userLeaderboard.save();
-
-    // Recalculate rankings
+  
+    // Recalculate rankings only for users with points > 0
     const allRankings = await this.leaderboardModel
-      .find({ currentWeek: week })
+      .find({ currentWeek: week, currentWeekTotal: { $gt: 0 } })
       .sort({ currentWeekTotal: -1 })
       .exec();
-
+  
     // Update ranks in bulk
     const bulkOps = allRankings.map((doc, index) => ({
       updateOne: {
@@ -288,26 +286,25 @@ export class QuizService {
         update: { $set: { rank: index + 1 } }
       }
     }));
-
+  
     await this.leaderboardModel.bulkWrite(bulkOps);
-
+  
     // Get the updated rank and currentWeekTotal for the user
     const updatedUser = await this.leaderboardModel.findOne({ userId });
-
+  
     // Update user's rank, currentWeekPoints, and total points in the user model
     await this.userModel.updateOne(
       { _id: userId },
       {
         $set: {
-          currentRank: updatedUser.rank,
-          points: updatedUser.grandtotal,
-          currentWeekPoints: updatedUser.currentWeekTotal,
+          currentRank: updatedUser.currentWeekTotal > 0 ? updatedUser.rank : 0,
+          points: updatedUser.currentWeekTotal,
         },
       }
     );
-
+  
     return {
-      rank: updatedUser.rank,
+      rank: updatedUser.currentWeekTotal > 0 ? updatedUser.rank : 0,
       currentWeekTotal: parseFloat(updatedUser.currentWeekTotal.toString()) || 0,
     };
   }
@@ -328,60 +325,61 @@ export class QuizService {
   async resetWeeklyTotals(): Promise<void> {
     const week = this.getCurrentWeekNumber();
     const lastWeek = week - 1;
-
-    // Fetch leaderboard rankings for last week based on `currentWeekTotal`
+  
+    // Fetch all leaderboard rankings for last week
     const rankings = await this.leaderboardModel
       .find({ currentWeek: lastWeek })
-      .sort({ currentWeekTotal: -1 }) // Sort by currentWeekTotal to determine weekly rank
+      .sort({ currentWeekTotal: -1 })
       .exec();
-
+  
     if (rankings.length > 0) {
       // Map the leaderboard data for the week based on currentWeekTotal
       const leaderboardHistory = rankings.map((entry, index) => ({
         userId: entry.userId,
-        rank: index + 1, // Assign ranks based on sorted currentWeekTotal
+        rank: entry.currentWeekTotal > 0 ? index + 1 : 0,
+        score: entry.currentWeekTotal
       }));
-
+  
       // Save the history for the last week
       await this.leaderboardHistoryModel.create({
-        week: lastWeek, // Save last week's number
-        rankings: leaderboardHistory, // Save the rankings based on currentWeekTotal
+        week: lastWeek,
+        rankings: leaderboardHistory,
       });
     }
-
-    // Reset current week totals and update last week's totals in leaderboard model
+  
+    // Reset current week totals and update last week's totals in leaderboard model for all records
     await this.leaderboardModel.updateMany(
-      { currentWeek: week },
+      {},
       [
         {
           $set: {
-            lastWeekTotal: '$currentWeekTotal', // Move currentWeekTotal to lastWeekTotal
-            currentWeekTotal: 0, // Reset current week total
+            lastWeekTotal: '$currentWeekTotal',
+            currentWeekTotal: 0,
+            rank: 0,
+            currentWeek: week,
           },
         },
       ]
     );
-
-   // Clear current rank and points in the User model and reset quizCompletionStatus
-  await this.userModel.updateMany(
-    {},
-    {
-      $set: {
-        currentRank: 0, // Reset current rank to 0
-        points: 0,      // Reset points to 0
-        // Reset quizCompletionStatus for all days to 'N'
-        quizCompletionStatus: [
-          { day: 1, status: 'N' },
-          { day: 2, status: 'N' },
-          { day: 3, status: 'N' },
-          { day: 4, status: 'N' },
-          { day: 5, status: 'N' },
-          { day: 6, status: 'N' },
-        ],
-      },
-    }
-  );
-
+  
+    // Clear current rank and points in the User model and reset quizCompletionStatus
+    await this.userModel.updateMany(
+      {},
+      {
+        $set: {
+          currentRank: 0,
+          points: 0,
+          quizCompletionStatus: [
+            { day: 1, status: 'N' },
+            { day: 2, status: 'N' },
+            { day: 3, status: 'N' },
+            { day: 4, status: 'N' },
+            { day: 5, status: 'N' },
+            { day: 6, status: 'N' },
+          ],
+        },
+      }
+    );
   }
 
   private getCurrentWeekNumber(): number {
@@ -392,28 +390,25 @@ export class QuizService {
   }
   async getCurrentWeekLeaderboard(): Promise<Array<{ fullName: string, currentWeekTotal: number, rank: number }>> {
     const week = this.getCurrentWeekNumber();
-
-    // Find all leaderboard entries for the current week, sorted by currentWeekTotal in descending order
+  
+    // Find all leaderboard entries for the current week with points > 0, sorted by currentWeekTotal in descending order
     const leaderboard = await this.leaderboardModel
-      .find({ currentWeek: week })
+      .find({ currentWeek: week, currentWeekTotal: { $gt: 0 } })
       .sort({ currentWeekTotal: -1 })
-      .populate('userId', 'fullName') // Populate only the fullName from the User model
+      .populate('userId', 'fullName')
       .exec();
-
-    // If all currentWeekTotal entries are 0, return an empty array
-    const allZeroPoints = leaderboard.every(entry => entry.currentWeekTotal === 0);
-
-    if (allZeroPoints) {
+  
+    if (leaderboard.length === 0) {
       return [];
     }
-
-    // Map the leaderboard data to return only fullName, currentWeekTotal, and rank
-    return leaderboard.map((entry) => {
-      const user = entry.userId as User; // Cast userId as User to access fullName
+  
+    // Map the leaderboard data and assign ranks
+    return leaderboard.map((entry, index) => {
+      const user = entry.userId as User;
       return {
-        fullName: user.fullName, // Only return the fullName
+        fullName: user.fullName.split(" ")[0],
         currentWeekTotal: entry.currentWeekTotal,
-        rank: entry.rank,
+        rank: index + 1, // Assign rank based on the sorted order
       };
     });
   }
