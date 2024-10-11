@@ -4,6 +4,7 @@ import { Model, Types, Schema } from 'mongoose';
 import { CreateQuizDto } from './dto/create-quiz.dto';
 import { UpdateQuizDto } from './dto/update-quiz.dto';
 import { updateQuestionDto } from './dto/updateQuestion.dto'
+import { AddQuestionsDto } from './dto/AddQuestionsDto'
 import { Quiz } from './schemas/quiz.schema';
 import { Question } from './schemas/question.schema';
 import { QuizSession } from './schemas/quizSession.schema';
@@ -46,6 +47,32 @@ export class QuizService {
     }
   }
 
+  async addQuestionsToQuiz(day: number, addQuestionsDto: AddQuestionsDto): Promise<Quiz> {
+    const { questions } = addQuestionsDto;
+
+    // Save new questions
+    const savedQuestions = await this.questionModel.insertMany(questions);
+    const newQuestionIds = savedQuestions.map(question => question._id);
+
+    try {
+      // Find the quiz and update it with new question IDs
+      const updatedQuiz = await this.quizModel.findOneAndUpdate(
+        { day },
+        { $push: { questionIds: { $each: newQuestionIds } } },
+        { new: true }
+      );
+
+      if (!updatedQuiz) {
+        throw new HttpException('Quiz not found', HttpStatus.NOT_FOUND);
+      }
+
+      return updatedQuiz;
+    } catch (error) {
+      console.error(error);
+      throw new HttpException('Failed to add questions to quiz', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
 
   async activateQuiz(quizId: string): Promise<Quiz | null> {
     try {
@@ -77,6 +104,24 @@ export class QuizService {
       throw new HttpException('Failed to retrieve active quiz', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+  async getQuizByDay(day: number): Promise<Quiz | null> {
+    try {
+      const quiz = await this.quizModel
+        .findOne({ day }) // Correctly use the day parameter in the query
+        .populate({
+          path: 'questionIds',
+          model: 'Question', // Specify the model to populate from
+        })
+        .exec();
+        
+      return quiz;
+    } catch (error) {
+      console.error('Error retrieving quiz by day:', error);
+      throw new HttpException('Failed to retrieve quiz by day', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+  
 
   async getInactiveQuiz(): Promise<Quiz[] | null> {
     try {

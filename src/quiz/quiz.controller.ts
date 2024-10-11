@@ -1,5 +1,6 @@
 import {
   Controller,
+  ParseIntPipe,
   Get,
   Post,
   Body,
@@ -17,6 +18,9 @@ import { QuizService } from './quiz.service';
 import { CreateQuizDto } from './dto/create-quiz.dto';
 import { UpdateQuizDto } from './dto/update-quiz.dto';
 import { updateQuestionDto } from './dto/updateQuestion.dto';
+import { AddQuestionsDto } from './dto/AddQuestionsDto'
+import { Quiz } from './schemas/quiz.schema';
+
 
 @Controller('quiz')
 export class QuizController {
@@ -261,5 +265,30 @@ export class QuizController {
       throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+  @Post('add-questions/:day')
+  async addQuestionsToQuiz(@Param('day') day: number, @Body() addQuestionsDto: AddQuestionsDto): Promise<Quiz> {
+    try {
+      return await this.quizService.addQuestionsToQuiz(day, addQuestionsDto);
+    } catch (error) {
+      console.error(error);
+      throw new HttpException('Failed to add questions to quiz', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('day/:day')
+  async getQuizByDay(@Param('day', ParseIntPipe) day: number): Promise<Quiz> {
+    try {
+      const quiz = await this.quizService.getQuizByDay(day);
+      if (!quiz) {
+        throw new HttpException('Quiz not found for the specified day', HttpStatus.NOT_FOUND);
+      }
+      return quiz;
+    } catch (error) {
+      console.error('Error fetching quiz by day:', error);
+      throw new HttpException('Failed to retrieve quiz by day', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
 }
 
